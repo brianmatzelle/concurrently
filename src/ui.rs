@@ -127,7 +127,12 @@ fn draw_agents(frame: &mut Frame, app: &App, area: Rect) {
                 Style::default().fg(Color::Gray)
             };
 
-            let tokens = if agent.tokens_received > 0 {
+            // Show current tool or token count
+            let info = if let Some(tool) = &agent.current_tool {
+                format!(" [{tool}]")
+            } else if agent.cost_usd > 0.0 {
+                format!(" ${:.3}", agent.cost_usd)
+            } else if agent.tokens_received > 0 {
                 format!(" ({}tk)", agent.tokens_received)
             } else {
                 String::new()
@@ -135,7 +140,15 @@ fn draw_agents(frame: &mut Frame, app: &App, area: Rect) {
 
             ListItem::new(Line::from(vec![
                 Span::styled(format!(" {status_icon} "), Style::default().fg(status_color)),
-                Span::styled(format!("{}{tokens}", agent.name), style),
+                Span::styled(agent.name.clone(), style),
+                Span::styled(
+                    info,
+                    Style::default().fg(if agent.current_tool.is_some() {
+                        Color::Magenta
+                    } else {
+                        Color::DarkGray
+                    }),
+                ),
             ]))
         })
         .collect();
@@ -151,7 +164,12 @@ fn draw_agents(frame: &mut Frame, app: &App, area: Rect) {
 
     // Agent detail view
     if let Some(agent) = app.agents.get(app.selected_agent) {
-        let title = format!(" {} [{}] ", agent.name, agent.status);
+        let cost_str = if agent.cost_usd > 0.0 {
+            format!(" ${:.4}", agent.cost_usd)
+        } else {
+            String::new()
+        };
+        let title = format!(" {} [{}]{} ", agent.name, agent.status, cost_str);
         let title_color = match &agent.status {
             AgentStatus::Running => Color::Yellow,
             AgentStatus::Done => Color::Green,
@@ -167,12 +185,17 @@ fn draw_agents(frame: &mut Frame, app: &App, area: Rect) {
             Line::from(""),
         ];
 
-        // Add output lines
+        // Add output lines with tool call highlighting
         let output = &agent.output;
         for line in output.lines() {
+            let color = if line.starts_with('[') && line.ends_with(']') {
+                Color::Magenta
+            } else {
+                Color::White
+            };
             lines.push(Line::from(Span::styled(
                 line.to_string(),
-                Style::default().fg(Color::White),
+                Style::default().fg(color),
             )));
         }
 

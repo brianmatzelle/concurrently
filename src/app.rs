@@ -78,8 +78,6 @@ impl App {
 
                         crate::agent::spawn_agent(
                             &agent,
-                            client.clone(),
-                            api_key.clone(),
                             event_tx.clone(),
                             &kernel,
                         );
@@ -243,7 +241,31 @@ impl App {
                 AgentEvent::TextDelta { agent_id, text } => {
                     if let Some(agent) = self.agents.iter_mut().find(|a| a.id == agent_id) {
                         agent.tokens_received += 1;
+                        agent.current_tool = None;
                         agent.output.push_str(&text);
+                    }
+                }
+                AgentEvent::ToolUse {
+                    agent_id,
+                    tool,
+                    detail,
+                } => {
+                    if let Some(agent) = self.agents.iter_mut().find(|a| a.id == agent_id) {
+                        let label = if detail.is_empty() {
+                            tool.clone()
+                        } else {
+                            format!("{tool}: {detail}")
+                        };
+                        agent.current_tool = Some(label.clone());
+                        agent.output.push_str(&format!("\n[{label}]\n"));
+                    }
+                }
+                AgentEvent::CostUpdate {
+                    agent_id,
+                    cost_usd,
+                } => {
+                    if let Some(agent) = self.agents.iter_mut().find(|a| a.id == agent_id) {
+                        agent.cost_usd = cost_usd;
                     }
                 }
                 AgentEvent::Finished { .. } => {
