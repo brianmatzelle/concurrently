@@ -75,5 +75,6 @@ claude -p <task>
 ## Distribution
 
 - **AUR**: `yay -S concurrently-bin` — PKGBUILD lives in `~/projects/maintaining/concurrently-bin/`
+- **Debian/Ubuntu**: `cargo deb` builds a `.deb` package from Cargo.toml metadata — install with `dpkg -i`
 - **Homebrew**: `brew tap brianmatzelle/tap && brew install concurrently`
 - **GitHub**: `brianmatzelle/concurrently`, releases have Linux x86_64 binaries

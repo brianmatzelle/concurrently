@@ -4,6 +4,19 @@ version = "0.1.0"
 edition = "2024"
 description = "Concurrent subagent workflow TUI - like Claude Code, but parallel"
 
+license = "MIT"
+authors = ["Brian Matzelle"]
+repository = "https://github.com/brianmatzelle/concurrently"
+
+[package.metadata.deb]
+maintainer = "Brian Matzelle"
+depends = "$auto"
+section = "utils"
+extended-description = "Each agent is a real Claude Code process (claude -p) running in parallel with full tool access — file editing, bash, search, everything."
+assets = [
+    ["target/release/concurrently", "usr/bin/", "755"],
+]
+
 [dependencies]
 ratatui = "0.29"
 crossterm = "0.28"
