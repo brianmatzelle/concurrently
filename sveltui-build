@@ -1,0 +1,138 @@
+#!/usr/bin/env bun
+/**
+ * SvelTUI Build Script
+ * Compiles your application together with the SvelTUI framework.
+ *
+ * Why compile together? Svelte 5 requires all .svelte and .svelte.ts files
+ * to be compiled in a single pass for proper reactivity.
+ */
+
+import * as svelte from 'svelte/compiler'
+import { $ } from 'bun'
+import { Glob } from 'bun'
+import { join, dirname } from 'path'
+
+const cwd = process.cwd()
+
+async function build() {
+  const startTime = Date.now()
+  console.log('\n🔨 Building SvelTUI application...\n')
+
+  // Clean dist
+  await $`rm -rf dist`
+  await $`mkdir -p dist`
+
+  // Find all source files
+  const files = []
+
+  // App source files
+  const appPatterns = ['src/**/*.svelte', 'src/**/*.svelte.ts', 'src/**/*.ts', 'src/**/*.js', 'src/**/*.mjs']
+  for (const pattern of appPatterns) {
+    const glob = new Glob(pattern)
+    for await (const file of glob.scan({ cwd })) {
+      files.push(file)
+    }
+  }
+
+  // SvelTUI framework files - compile together with app
+  const sveltUIPath = 'node_modules/@rlabs-inc/sveltui/src'
+  const sveltUIPatterns = ['**/*.svelte', '**/*.svelte.ts', '**/*.ts', '**/*.js']
+  for (const pattern of sveltUIPatterns) {
+    const glob = new Glob(pattern)
+    for await (const file of glob.scan({ cwd: join(cwd, sveltUIPath) })) {
+      if (file.includes('test/')) continue
+      files.push(join(sveltUIPath, file))
+    }
+  }
+
+  console.log(`  Found ${files.length} files to compile\n`)
+
+  let compiled = 0
+  const errors = []
+
+  // Compile each file
+  for (const file of files) {
+    try {
+      const source = await Bun.file(file).text()
+      const outPath = join('dist', file)
+      await $`mkdir -p ${dirname(outPath)}`
+
+      if (file.endsWith('.svelte')) {
+        const result = svelte.compile(source, {
+          filename: file,
+          generate: 'client',
+          css: 'injected',
+          runes: true,
+          compatibility: { componentApi: 5 }
+        })
+        await Bun.write(outPath + '.mjs', result.js.code)
+      } else if (file.endsWith('.svelte.ts')) {
+        const transpiler = new Bun.Transpiler({ loader: 'ts' })
+        const jsCode = transpiler.transformSync(source)
+        const result = svelte.compileModule(jsCode, {
+          filename: file,
+          generate: 'client'
+        })
+        await Bun.write(outPath.replace('.svelte.ts', '.svelte.js'), result.js.code)
+      } else if (file.endsWith('.ts')) {
+        const transpiler = new Bun.Transpiler({ loader: 'ts' })
+        const jsCode = transpiler.transformSync(source)
+        await Bun.write(outPath.replace('.ts', '.mjs'), jsCode)
+      } else {
+        await Bun.write(outPath, source)
+      }
+      compiled++
+    } catch (err) {
+      errors.push({ file, error: err.message })
+    }
+  }
+
+  // Fix imports
+  console.log('  Fixing import paths...')
+  const distFiles = []
+  const distGlob = new Glob('**/*.{mjs,js}')
+  for await (const file of distGlob.scan({ cwd: 'dist' })) {
+    distFiles.push(join('dist', file))
+  }
+
+  for (const file of distFiles) {
+    const content = await Bun.file(file).text()
+
+    // Calculate relative path to node_modules based on file depth
+    // e.g., dist/src/main.mjs -> ../node_modules/
+    // e.g., dist/src/tui/components/input/Input.svelte.mjs -> ../../../../node_modules/
+    const depth = file.split('/').length - 2  // -2 for 'dist' and filename
+    const relativePrefix = '../'.repeat(depth)
+
+    const fixed = content
+      .replace(/from\s+['"]([^'"]+)\.svelte['"]/g, "from '$1.svelte.mjs'")
+      .replace(/from\s+['"]([^'"]+)\.svelte\.ts['"]/g, "from '$1.svelte.js'")
+      .replace(/from\s+['"](\.\.?\/[^'"]+)\.ts['"]/g, "from '$1.mjs'")
+      .replace(/from\s+["']sveltui["']/g, `from '${relativePrefix}node_modules/@rlabs-inc/sveltui/src/index.mjs'`)
+      .replace(/from\s+["']sveltui\/src\//g, `from '${relativePrefix}node_modules/@rlabs-inc/sveltui/src/`)
+
+    if (fixed !== content) {
+      await Bun.write(file, fixed)
+    }
+  }
+
+  const elapsed = ((Date.now() - startTime) / 1000).toFixed(2)
+
+  // On success: clear screen for clean app launch
+  // On error: keep all output visible for debugging
+  if (errors.length > 0) {
+    console.log('\n⚠️  Build completed with errors:\n')
+    for (const { file, error } of errors) {
+      console.log(`  ✗ ${file}`)
+      console.log(`    ${error}\n`)
+    }
+    console.log(`Build failed with ${errors.length} error${errors.length > 1 ? 's' : ''}\n`)
+    process.exit(1)
+  }
+
+  // Success: clear screen and let the app take over completely
+  // No message needed - if it works, it works!
+  console.clear()
+}
+
+await build()

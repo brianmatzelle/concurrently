@@ -6,11 +6,17 @@ Concurrent subagent workflow TUI. Each agent is a real Claude Code process (`cla
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
-cargo build --release
-cargo run
+bun install
+bun run dev
 ```
 
-Requires `claude` CLI installed and on PATH.
+For development with auto-rebuild:
+```bash
+# Watch for changes and rebuild
+bun run build   # then bun run start
+```
+
+Requires `claude` CLI installed and on PATH, and Bun runtime.
 
 ## Architecture
 
@@ -22,34 +28,39 @@ Orchestrator (raw Anthropic API, non-streaming)
     │  decomposes task into 2-5 subtasks
     ▼
 ┌────────────────────────────────┐
-│  tokio::spawn × N              │
+│  Bun.spawn() × N               │
 │  claude -p "task"              │
 │    --output-format stream-json │
 │    --append-system-prompt ...  │
 │    --dangerously-skip-perms    │
 │  Each agent = real Claude Code │
 └────────────┬───────────────────┘
-             │ mpsc AgentEvents
+             │ Direct $state mutation
              ▼
-         App event loop (30fps)
+         Svelte 5 reactive rendering
              │
              ▼
-         ratatui TUI
+         SvelTUI (terminal UI)
 ```
 
 ### Source Files
 
-- `src/main.rs` — Entry point, terminal setup, 30fps event loop, keybindings
-- `src/app.rs` — App state, kernel (shared conversation history), agent lifecycle, synthesizer
-- `src/agent.rs` — Spawns `claude -p` processes, parses `stream-json` stdout into AgentEvents
-- `src/api.rs` — Raw Anthropic API client (streaming + non-streaming), used only by orchestrator and synthesizer
-- `src/orchestrator.rs` — Task decomposition: sends user prompt to Claude, gets back JSON array of subtasks
-- `src/ui.rs` — Ratatui rendering: header, agent list sidebar, detail view, status bar
+- `src/main.ts` — Entry point, API key validation, SvelTUI mount (fullscreen)
+- `src/App.svelte` — Root component, keyboard handling, mode-based layout switching
+- `src/lib/state.svelte.ts` — AppState class with Svelte 5 `$state` runes, agent lifecycle, synthesizer
+- `src/lib/agent.ts` — Spawns `claude -p` via `Bun.spawn()`, parses `stream-json` stdout into events
+- `src/lib/api.ts` — Raw Anthropic API client (streaming SSE + non-streaming) via native `fetch`
+- `src/lib/orchestrator.ts` — Task decomposition: sends user prompt to Claude, gets back JSON array of subtasks
+- `src/components/Header.svelte` — Header bar with agent count, kernel size, elapsed time
+- `src/components/InputView.svelte` — Help text + task input box
+- `src/components/AgentList.svelte` — Left sidebar with agent status icons and info
+- `src/components/AgentDetail.svelte` — Right panel with selected agent's streaming output
+- `src/components/StatusBar.svelte` — Bottom bar with status message and keybinding hints
 
 ### Key Concepts
 
-- **Kernel** (`Vec<Message>`): Shared conversation history. Every agent and the orchestrator see it. When agents complete, results fold back into the kernel. Persists across rounds (press `n` for new task).
-- **AgentEvent**: Enum sent over mpsc channels from agent tokio tasks to the main loop. Variants: `StatusChange`, `TextDelta`, `ToolUse`, `CostUpdate`, `Finished`.
+- **Kernel** (`Message[]`): Shared conversation history. Every agent and the orchestrator see it. When agents complete, results fold back into the kernel. Persists across rounds (press `n` for new task).
+- **Reactive state**: No event loop or channels. Agent callbacks directly mutate Svelte 5 `$state`, triggering automatic re-renders. All state lives in the `AppState` class (`state.svelte.ts`).
 - **stream-json parsing**: Each `claude -p` outputs newline-delimited JSON. We parse `assistant` messages (extract text deltas + tool_use blocks) and `result` messages (done/error + cost).
 
 ## Key Bindings
@@ -75,6 +86,5 @@ claude -p <task>
 ## Distribution
 
 - **AUR**: `yay -S concurrently-bin` — PKGBUILD lives in `~/projects/maintaining/concurrently-bin/`
-- **Debian/Ubuntu**: `cargo deb` builds a `.deb` package from Cargo.toml metadata — install with `dpkg -i`
 - **Homebrew**: `brew tap brianmatzelle/tap && brew install concurrently`
 - **GitHub**: `brianmatzelle/concurrently`, releases have Linux x86_64 binaries

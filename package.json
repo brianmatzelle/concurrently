@@ -1,0 +1,21 @@
+{
+  "name": "concurrently",
+  "version": "0.2.0",
+  "type": "module",
+  "description": "Concurrent subagent workflow TUI - like Claude Code, but parallel",
+  "license": "MIT",
+  "author": "Brian Matzelle",
+  "repository": "https://github.com/brianmatzelle/concurrently",
+  "scripts": {
+    "dev": "bun run build && bun run start",
+    "watch": "watchexec -r -e svelte,ts -- bun run dev",
+    "build": "./sveltui-build",
+    "start": "bun --conditions browser dist/src/main.mjs"
+  },
+  "dependencies": {
+    "svelte": "^5.38.7",
+    "@happy-dom/global-registrator": "^18.0.1",
+    "yoga-layout": "^3.2.1",
+    "@rlabs-inc/sveltui": "^0.1.7"
+  }
+}
