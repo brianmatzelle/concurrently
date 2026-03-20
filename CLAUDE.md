@@ -1,83 +1,75 @@
-# concurrently
+# CLAUDE.md
 
-Concurrent subagent workflow TUI. Each agent is a real Claude Code process (`claude -p`) running in parallel with full tool access — file editing, bash, search, everything.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## What This Is
+
+Concurrent subagent workflow TUI. Each agent is a real Claude Code process (`claude -p`) running in parallel with full tool access. Built with Svelte 5 + SvelTUI (terminal rendering via yoga-layout).
+
+Branch `pivot/svelTUI` is the active branch — the Rust/ratatui version (`src/*.rs`, `Cargo.toml`) is legacy from `main`.
 
 ## Build & Run
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
 bun install
-bun run dev
+bun run dev          # build + start
+bun run build        # just compile (./sveltui-build)
+bun run start        # run compiled output (bun --conditions browser dist/src/main.mjs)
+bun run watch        # auto-rebuild on changes (needs watchexec)
 ```
 
-For development with auto-rebuild:
-```bash
-# Watch for changes and rebuild
-bun run build   # then bun run start
-```
+Requires `claude` CLI on PATH and Bun runtime.
 
-Requires `claude` CLI installed and on PATH, and Bun runtime.
+### Post-install Patch (Required)
+
+After `bun install`, patch `node_modules/@rlabs-inc/sveltui/src/mount.svelte.ts` lines 65-67 — remove the three `onKey` calls (`Tab`, `Shift+Tab`, `Escape`). SvelTUI's built-in focus handlers swallow these events before app handlers run. Rebuild after patching.
 
 ## Architecture
 
 ```
-User prompt
-    │
-    ▼
-Orchestrator (raw Anthropic API, non-streaming)
-    │  decomposes task into 2-5 subtasks
-    ▼
-┌────────────────────────────────┐
-│  Bun.spawn() × N               │
-│  claude -p "task"              │
-│    --output-format stream-json │
-│    --append-system-prompt ...  │
-│    --dangerously-skip-perms    │
-│  Each agent = real Claude Code │
-└────────────┬───────────────────┘
-             │ Direct $state mutation
-             ▼
-         Svelte 5 reactive rendering
-             │
-             ▼
-         SvelTUI (terminal UI)
+User input → AppState.submitInput()
+  → createNewAgent() or respondToAgent()
+    → spawnAgent(): Bun.spawn("claude -p ...")
+      → stdout stream-json → parseStreamLine() → AgentEvent callbacks
+        → direct $state mutation on AppState → Svelte re-render
 ```
 
-### Source Files
+**Four source files (all in `src/`):**
 
-- `src/main.ts` — Entry point, API key validation, SvelTUI mount (fullscreen)
-- `src/App.svelte` — Root component, keyboard handling, mode-based layout switching
-- `src/lib/state.svelte.ts` — AppState class with Svelte 5 `$state` runes, agent lifecycle, synthesizer
-- `src/lib/agent.ts` — Spawns `claude -p` via `Bun.spawn()`, parses `stream-json` stdout into events
-- `src/lib/api.ts` — Raw Anthropic API client (streaming SSE + non-streaming) via native `fetch`
-- `src/lib/orchestrator.ts` — Task decomposition: sends user prompt to Claude, gets back JSON array of subtasks
-- `src/components/Header.svelte` — Header bar with agent count, kernel size, elapsed time
-- `src/components/InputView.svelte` — Help text + task input box
-- `src/components/AgentList.svelte` — Left sidebar with agent status icons and info
-- `src/components/AgentDetail.svelte` — Right panel with selected agent's streaming output
-- `src/components/StatusBar.svelte` — Bottom bar with status message and keybinding hints
+- `main.ts` — Entry point. Validates `ANTHROPIC_API_KEY`, mounts SvelTUI fullscreen, mounts Svelte `App` component.
+- `App.svelte` — Single-file UI. Keyboard handling, log display, agent status bar, input line. All rendering logic lives here.
+- `lib/state.svelte.ts` — `AppState` singleton with Svelte 5 `$state` runes. Manages agents, log, input, scroll. Exports `app`.
+- `lib/agent.ts` — Agent types, `spawnAgent()` (Bun.spawn + stream-json parsing), `createAgent()` factory.
 
 ### Key Concepts
 
-- **Kernel** (`Message[]`): Shared conversation history. Every agent and the orchestrator see it. When agents complete, results fold back into the kernel. Persists across rounds (press `n` for new task).
-- **Reactive state**: No event loop or channels. Agent callbacks directly mutate Svelte 5 `$state`, triggering automatic re-renders. All state lives in the `AppState` class (`state.svelte.ts`).
-- **stream-json parsing**: Each `claude -p` outputs newline-delimited JSON. We parse `assistant` messages (extract text deltas + tool_use blocks) and `result` messages (done/error + cost).
+- **No orchestrator on this branch.** Users type tasks directly. `"name: task"` syntax names agents; plain text auto-names them `agent-N`.
+- **Conversation persistence**: Each agent has a `conversation: Message[]`. When done, users can send follow-up messages to the selected agent — it respawns `claude -p` with prior conversation as system context.
+- **Reactive state, no event loop**: Agent stdout callbacks mutate `$state` directly on the `AppState` singleton, triggering Svelte re-renders.
+- **stream-json parsing**: `claude -p --output-format stream-json` emits newline-delimited JSON. `parseStreamLine()` extracts `assistant` messages (text deltas + tool_use blocks) and `result` messages (done/error + cost).
+- **`/s` prefix**: `/s <task>` forces spawning a new agent even when one is selected.
+
+### Build System
+
+`./sveltui-build` is a custom Bun script that compiles all `.svelte` and `.svelte.ts` files (app + SvelTUI framework) in a single pass via `svelte/compiler`, then fixes import paths in the output. Required because Svelte 5 reactivity needs unified compilation.
 
 ## Key Bindings
 
-- **Input mode**: Type task, `Enter` to submit
-- **Running mode**: `↑`/`↓` select agent, `j`/`k` scroll output
-- **Done mode**: `s` synthesize, `n` new task (keeps kernel), `q` quit
-- `Ctrl+C` quits from any mode
+- Any printable key: appends to input
+- `Enter`: submit input (spawn agent or respond to selected agent)
+- `Tab`: cycle selected agent
+- `Escape`: deselect agent
+- `PageUp`/`PageDown`: scroll log
+- `Ctrl+C`: quit
 
-## Agent Flags
+## Agent Spawn Flags
 
-Each agent spawns with:
 ```
 claude -p <task>
-  --append-system-prompt <kernel context>
+  --append-system-prompt <conversation context>
   --output-format stream-json
-  --include-partial-messages
+  --verbose
   --dangerously-skip-permissions
   --no-session-persistence
   --model sonnet
@@ -87,4 +79,4 @@ claude -p <task>
 
 - **AUR**: `yay -S concurrently-bin` — PKGBUILD lives in `~/projects/maintaining/concurrently-bin/`
 - **Homebrew**: `brew tap brianmatzelle/tap && brew install concurrently`
-- **GitHub**: `brianmatzelle/concurrently`, releases have Linux x86_64 binaries
+- **GitHub**: `brianmatzelle/concurrently`
